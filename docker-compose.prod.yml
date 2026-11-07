@@ -1,0 +1,146 @@
+# Chạy toàn bộ hệ thống trên một server.
+#   cp .env.example .env   (điền mật khẩu, secret)
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Có domain và muốn HTTPS tự động: đặt DOMAIN, FRONTEND_BIND=127.0.0.1:8080 trong .env rồi thêm --profile https
+#
+# Chỉ nginx (frontend) mở cổng ra ngoài; MySQL, Redis, RabbitMQ, MinIO chỉ nằm trong mạng nội bộ.
+
+name: reviewfilm
+
+services:
+  mysql:
+    image: mysql:8.0
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Đặt MYSQL_ROOT_PASSWORD trong .env}
+      MYSQL_DATABASE: movie_web
+      MYSQL_USER: ${MYSQL_USER:-reviewfilm}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Đặt MYSQL_PASSWORD trong .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # Chỉ chạy lần đầu (khi volume còn trống): tạo bảng + dữ liệu danh mục
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      # User guest chỉ đăng nhập được từ localhost nên phải tạo user riêng
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-reviewfilm}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Đặt RABBITMQ_PASSWORD trong .env}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  # MinIO đã ngừng phát hành image chính thức; image Chainguard chỉ chạy được bằng root
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    user: "0"
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-reviewfilm}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Đặt MINIO_ROOT_PASSWORD trong .env (tối thiểu 8 ký tự)}
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  backend:
+    build: ./film/back_end
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      minio: { condition: service_started }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/movie_web?useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-reviewfilm}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET trong .env (tối thiểu 32 ký tự)}
+      APP_FE_BASE_URL: ${PUBLIC_URL:?Đặt PUBLIC_URL trong .env, ví dụ https://reviewfilm.vn}
+      APP_COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USER:-reviewfilm}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-reviewfilm}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      # nginx chuyển /media sang bucket, nên ảnh cùng domain với web
+      S3_PUBLIC_URL: ${PUBLIC_URL}/media
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-true}
+      MAIL_STARTTLS: ${MAIL_STARTTLS:-true}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@example.com}
+      TMDB_READ_TOKEN: ${TMDB_READ_TOKEN:-}
+      # Tắt Swagger trên production
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError}
+    restart: unless-stopped
+
+  frontend:
+    build: ./film/font_end
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      # Có Caddy (HTTPS) thì đặt FRONTEND_BIND=127.0.0.1:8080 để không mở cổng 80 hai lần
+      - "${FRONTEND_BIND:-80}:80"
+    restart: unless-stopped
+
+  # HTTPS tự động (Let's Encrypt). Bật bằng: --profile https
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: ["https"]
+    depends_on: [frontend]
+    command: ["caddy", "reverse-proxy", "--from", "${DOMAIN:-localhost}", "--to", "frontend:80"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+    networks:
+      default:
+        # nginx chỉ tin header X-Forwarded-For từ đúng IP này (xem film/font_end/nginx.conf)
+        ipv4_address: 172.30.0.10
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        # Dải cố định để Caddy có IP cố định. Trùng với mạng khác trên server thì đổi cả nginx.conf
+        - subnet: 172.30.0.0/24
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+  caddy-data:

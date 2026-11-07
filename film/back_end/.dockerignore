@@ -1,0 +1,10 @@
+target/
+uploads/
+.settings/
+.classpath
+.project
+.mvn/wrapper/maven-wrapper.jar
+HELP.md
+# Không đưa mật khẩu / secret của máy dev vào image
+src/main/resources/application-local.properties
+*.log

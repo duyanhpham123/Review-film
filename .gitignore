@@ -1,0 +1,8 @@
+# Mật khẩu, secret khi deploy
+.env
+
+# Cấu hình riêng của công cụ / IDE trên máy
+.claude/
+.idea/
+.vscode/
+*.log

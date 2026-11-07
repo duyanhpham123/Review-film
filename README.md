@@ -689,7 +689,7 @@ Xóa cache trang chủ + chi tiết phim
 
 Chạy backend khi dev:
 
-1. Tạo DB bằng `database/01_schema.sql`, `02_seed.sql`.
+1. Tạo DB bằng `database/01_schema.sql`, `02_seed.sql`. DB đã tạo từ bản schema đầu tiên (19 bảng, chưa có `movies.is_hidden`) thì chạy thêm `database/upgrades/v1_to_v2.sql`; file này chỉ thêm cột / bảng, không mất dữ liệu.
 2. Ghi mật khẩu MySQL và JWT secret vào `src/main/resources/application-local.properties` (đã gitignore). Muốn import phim từ TMDB thì thêm `app.tmdb.read-token=...` (API Read Access Token lấy tại https://www.themoviedb.org/settings/api); không có key thì các chức năng khác vẫn chạy, chỉ import báo 503.
 3. `docker compose up -d` trong `film/back_end` để chạy Redis, RabbitMQ (quản lý tại http://localhost:15672, guest / guest), MinIO (quản lý tại http://localhost:9001, minioadmin / minioadmin) và Mailpit (xem mail tại http://localhost:8025).
 4. Chạy `FilmApplication` (cổng 8081), Swagger tại http://localhost:8081/swagger-ui.html.

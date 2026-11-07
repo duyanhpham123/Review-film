@@ -5,6 +5,79 @@ Stack: Java + Spring Boot (backend), React thuần + Vite (frontend), MySQL, Red
 Website cho phép tra cứu thông tin phim, chấm điểm, viết bài review, bình luận và lưu danh sách phim cá nhân. Website không phát video.
 
 
+## Chạy trên máy mới
+
+Có hai cách. Chỉ muốn chạy xem thì dùng cách 1; muốn sửa code thì dùng cách 2.
+
+### Cách 1: chỉ cần Docker (không cài Java, Node, MySQL)
+
+1. Cài [Docker Desktop](https://www.docker.com/products/docker-desktop/) và mở nó lên (góc trái dưới báo "Engine running").
+2. Tải code: `git clone https://github.com/duyanhpham123/Review-film.git` rồi `cd Review-film`.
+3. Tạo file `.env` ở thư mục gốc (cạnh `docker-compose.prod.yml`) với nội dung sau, tự đặt các mật khẩu:
+   ```
+   PUBLIC_URL=http://localhost:8080
+   FRONTEND_BIND=8080
+   COOKIE_SECURE=false
+   MYSQL_ROOT_PASSWORD=dat-mat-khau-1
+   MYSQL_PASSWORD=dat-mat-khau-2
+   RABBITMQ_PASSWORD=dat-mat-khau-3
+   MINIO_ROOT_PASSWORD=dat-mat-khau-4
+   JWT_SECRET=mot-chuoi-ngau-nhien-dai-it-nhat-32-ky-tu
+   ```
+4. Chạy (lần đầu mất vài phút để tải và build):
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d --build
+   ```
+5. Mở http://localhost:8080 và đăng ký một tài khoản. Sau đó mở MySQL trong container (nhập `MYSQL_ROOT_PASSWORD` khi được hỏi):
+   ```bash
+   docker compose -f docker-compose.prod.yml exec mysql mysql -uroot -p movie_web
+   ```
+   Dán hai câu sau (thay `ten_cua_ban`), rồi gõ `exit`:
+   ```sql
+   UPDATE users SET email_verified_at = UTC_TIMESTAMP() WHERE username = 'ten_cua_ban';
+   INSERT IGNORE INTO user_roles (user_id, role_id) SELECT u.id, r.id FROM users u, roles r WHERE u.username = 'ten_cua_ban' AND r.name = 'ROLE_ADMIN';
+   ```
+   Đăng xuất rồi đăng nhập lại, bấm vào tên mình ở góc phải → **Quản trị**.
+
+Tắt: `docker compose -f docker-compose.prod.yml down` (dữ liệu vẫn giữ). Xóa sạch cả dữ liệu: thêm `-v`.
+Không có cấu hình SMTP nên không gửi được mail; lệnh ở bước 5 đã đánh dấu email là đã xác thực.
+
+### Cách 2: môi trường code (sửa backend / frontend)
+
+Cần cài:
+
+| Phần mềm | Phiên bản | Dùng cho |
+| -------- | --------- | -------- |
+| JDK | 21 | Backend (Eclipse / IntelliJ, hoặc `mvnw` trong thư mục backend) |
+| Node.js | 24 | Frontend |
+| MySQL Server + Workbench | 8.0.16 trở lên | Database |
+| Docker Desktop | bản mới | Redis, RabbitMQ, MinIO, Mailpit |
+
+Các bước:
+
+1. **Database:** mở MySQL Workbench, chạy `database/01_schema.sql` bằng nút chạy toàn bộ script (Ctrl+Shift+Enter), rồi `database/02_seed.sql`.
+2. **Cấu hình backend:** trong `film/back_end/src/main/resources/`, sao chép `application-local.properties.example` thành `application-local.properties`, điền mật khẩu root MySQL và `app.jwt.secret` (chuỗi ngẫu nhiên tối thiểu 32 ký tự).
+3. **Dịch vụ phụ:** trong thư mục `film/back_end` chạy `docker compose up -d` (Redis, RabbitMQ, MinIO, Mailpit). Mỗi lần khởi động lại máy cần chạy lại lệnh này, với Docker Desktop đang mở.
+4. **Backend:** chạy `FilmApplication` trong IDE, hoặc trong `film/back_end` chạy `mvnw spring-boot:run` (Windows: `mvnw.cmd spring-boot:run`). Chạy ở cổng 8081; Swagger tại http://localhost:8081/swagger-ui.html.
+5. **Frontend:** trong `film/font_end` chạy `npm install` (chỉ lần đầu) rồi `npm run dev`, mở http://localhost:5173.
+6. **Tài khoản admin:** đăng ký trên web, mail xác thực xem tại http://localhost:8025 (Mailpit). Cấp quyền admin bằng SQL trong Workbench:
+   ```sql
+   INSERT INTO movie_web.user_roles (user_id, role_id)
+   SELECT u.id, r.id FROM movie_web.users u, movie_web.roles r
+   WHERE u.username = 'ten_cua_ban' AND r.name = 'ROLE_ADMIN';
+   ```
+
+Lỗi thường gặp:
+
+| Hiện tượng | Nguyên nhân |
+| ---------- | ----------- |
+| Backend dừng ngay khi khởi động, báo thiếu `app.jwt.secret` | Chưa tạo `application-local.properties` (bước 2) |
+| Backend báo `Schema-validation: missing column / table` | DB tạo từ schema cũ: chạy `database/upgrades/v1_to_v2.sql` hoặc tạo lại DB |
+| Web báo "Không kết nối được máy chủ" | Backend chưa chạy ở cổng 8081 |
+| Upload ảnh báo lỗi, không có thông báo | Chưa chạy `docker compose up -d` (bước 3) |
+| `docker compose` báo cổng đã bị dùng | Đổi cổng trong `docker-compose.yml` / `.env`, hoặc tắt chương trình đang dùng cổng đó |
+
+
 ## 1. Danh sách API
 
 ### 1.1. Tổng quan

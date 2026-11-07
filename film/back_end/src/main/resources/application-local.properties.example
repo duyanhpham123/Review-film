@@ -1,0 +1,11 @@
+# Sao chép file này thành application-local.properties (cùng thư mục) rồi điền giá trị.
+# application-local.properties đã nằm trong .gitignore, không bị đưa lên git.
+
+# Mật khẩu user root của MySQL trên máy
+spring.datasource.password=
+
+# Chuỗi ngẫu nhiên tối thiểu 32 ký tự, ví dụ sinh bằng: openssl rand -base64 48
+app.jwt.secret=
+
+# Không bắt buộc: token TMDB để import phim (https://www.themoviedb.org/settings/api)
+#app.tmdb.read-token=

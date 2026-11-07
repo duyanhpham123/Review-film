@@ -6,3 +6,6 @@
 .idea/
 .vscode/
 *.log
+
+# Thông tin đăng nhập tài khoản thử trên máy
+*.local.txt
